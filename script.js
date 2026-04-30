@@ -29,8 +29,11 @@ async function handleImageUpload(event) {
     document.getElementById('loadingOverlay').style.display = 'flex';
 
     try {
-        // Tesseract.js를 사용하여 이미지에서 텍스트 추출 (한국어 + 영어)
-        const result = await Tesseract.recognize(file, 'kor+eng', {
+        // 이미지 전처리 (흑백 변환 및 대비 극대화로 인식률 대폭 향상)
+        const processedCanvas = await preprocessImage(file);
+
+        // Tesseract.js를 사용하여 전처리된 이미지에서 텍스트 추출
+        const result = await Tesseract.recognize(processedCanvas, 'kor+eng', {
             logger: m => console.log(m) // 진행상황 로그
         });
 
@@ -47,6 +50,59 @@ async function handleImageUpload(event) {
         document.getElementById('loadingOverlay').style.display = 'none';
         event.target.value = ''; // 입력 초기화
     }
+}
+
+// 이미지 전처리 함수 (Canvas API 활용)
+function preprocessImage(file) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // 해상도 최적화 (가로 1200px 기준)
+                let width = img.width;
+                let height = img.height;
+                const MAX_WIDTH = 1200;
+                
+                if (width > MAX_WIDTH) {
+                    height = Math.round((height *= MAX_WIDTH / width));
+                    width = MAX_WIDTH;
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // 픽셀 데이터 조작 (흑백 변환 및 명암 대비 1.5배 증가)
+                const imageData = ctx.getImageData(0, 0, width, height);
+                const data = imageData.data;
+                const contrast = 1.5;
+                const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+
+                for (let i = 0; i < data.length; i += 4) {
+                    // 1. Grayscale
+                    const avg = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+                    
+                    // 2. Contrast
+                    let color = factor * (avg - 128) + 128;
+                    color = Math.min(255, Math.max(0, color));
+                    
+                    data[i] = color;     // R
+                    data[i+1] = color;   // G
+                    data[i+2] = color;   // B
+                }
+                ctx.putImageData(imageData, 0, 0);
+                
+                // Tesseract가 인식하기 가장 좋은 흑백/고대비 Canvas 반환
+                resolve(canvas);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
 }
 
 // OCR 텍스트 파싱 로직 (정규식 기반)
