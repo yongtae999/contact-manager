@@ -167,6 +167,7 @@ function parseBusinessCard(text) {
     document.getElementById('phoneInput').value = phone;
     document.getElementById('telInput').value = tel;
     document.getElementById('emailInput').value = email;
+    document.getElementById('memoInput').value = '';
     
     // OCR 알림 메시지 표시
     document.getElementById('ocrNotice').style.display = 'block';
@@ -189,6 +190,7 @@ function openFormModal(editId = null) {
             document.getElementById('phoneInput').value = contact.phone;
             document.getElementById('telInput').value = contact.tel || '';
             document.getElementById('emailInput').value = contact.email || '';
+            document.getElementById('memoInput').value = contact.memo || '';
         }
     } else {
         document.getElementById('modalTitle').innerText = '새 연락처 추가';
@@ -212,6 +214,7 @@ function saveContact() {
     const email = document.getElementById('emailInput').value.trim();
     const org = document.getElementById('orgInput').value.trim();
     const title = document.getElementById('titleInput').value.trim();
+    const memo = document.getElementById('memoInput').value.trim();
 
     if (!name || !phone) {
         alert("성명과 휴대폰 번호는 필수 입력입니다.");
@@ -222,13 +225,13 @@ function saveContact() {
         // 수정
         const index = contacts.findIndex(c => c.id === id);
         if (index > -1) {
-            contacts[index] = { id, name, phone, tel, email, org, title };
+            contacts[index] = { id, name, phone, tel, email, org, title, memo };
         }
     } else {
         // 신규 추가
         const newContact = {
             id: Date.now().toString(),
-            name, phone, tel, email, org, title
+            name, phone, tel, email, org, title, memo
         };
         contacts.unshift(newContact); // 최신 항목이 위로
     }
@@ -310,7 +313,8 @@ function exportToExcel() {
         '성명': c.name || '',
         '휴대폰번호': c.phone || '',
         '일반전화': c.tel || '',
-        '이메일': c.email || ''
+        '이메일': c.email || '',
+        '비고(메모)': c.memo || ''
     }));
 
     // 워크북 생성
@@ -325,7 +329,8 @@ function exportToExcel() {
         { wch: 15 }, // 성명
         { wch: 18 }, // 휴대폰번호
         { wch: 18 }, // 일반전화
-        { wch: 25 }  // 이메일
+        { wch: 25 }, // 이메일
+        { wch: 30 }  // 비고(메모)
     ];
 
     XLSX.utils.book_append_sheet(wb, ws, "연락처 목록");

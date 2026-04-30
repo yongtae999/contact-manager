@@ -38,11 +38,11 @@
                 <h3>명함 스캔</h3>
                 <p>사진을 찍어 자동 입력</p>
             </div>
-            <!-- 직접 입력 -->
+            <!-- 수동 입력 -->
             <div class="action-card secondary" onclick="openFormModal()">
                 <span class="material-icons-rounded">edit_square</span>
-                <h3>직접 입력</h3>
-                <p>수동으로 연락처 저장</p>
+                <h3>수동 입력</h3>
+                <p>명함 없이 직접 입력</p>
             </div>
         </div>
 
@@ -112,6 +112,10 @@
                     <div class="form-group">
                         <label>이메일 주소</label>
                         <input type="email" id="emailInput" placeholder="예: example@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label>비고 (메모)</label>
+                        <textarea id="memoInput" placeholder="기타 특징이나 메모를 입력하세요" style="width: 100%; padding: 14px; border: 1px solid var(--border-color); border-radius: 10px; font-size: 16px; font-family: inherit; resize: vertical; min-height: 80px;"></textarea>
                     </div>
                 </form>
             </div>
