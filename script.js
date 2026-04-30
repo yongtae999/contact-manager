@@ -58,7 +58,8 @@ function parseBusinessCard(text) {
                .replace(/환걍|환경청|환겸/g, '환경')
                .replace(/대리|데리/g, '대리')
                .replace(/과징|과장/g, '과장')
-               .replace(/부징|부장/g, '부장');
+               .replace(/부징/g, '부장')
+               .replace(/으도겨|우둥걸|오동걸|으동걸/g, '우동걸');
 
     let name = "";
     let phone = "";
@@ -115,11 +116,12 @@ function parseBusinessCard(text) {
             }
         }
         
-        // 주소 추출 (시/도/군/구/동/로/길 패턴)
+        // 주소 추출 좀 더 넓게
         if (!address) {
-            if (line.includes('특별시') || line.includes('광역시') || line.match(/[가-힣]+[도시군구]\s+[가-힣]+[동읍면리로길]/)) {
-                let possibleAddress = line.replace(/^(주소|Add|Address|A)\s*[:]?\s*/i, '').trim();
-                if (possibleAddress.length > 5) {
+            const addrKeywords = ['특별시', '광역시', '도 ', '시 ', '군 ', '구 ', '동 ', '읍 ', '면 ', '로 ', '길 ', '번길', '빌딩', '타워', '지하', '층 ', '대로'];
+            if ((addrKeywords.some(kw => line.includes(kw)) && line.length > 8 && /\d/.test(line)) || line.match(/[가-힣]+[도시군구]\s+[가-힣]+[동읍면리로길]/)) {
+                let possibleAddress = line.replace(/^(주소|Add|Address|A|우편|지번|도로명|본부|지부)\s*[:\-\.]?\s*/i, '').trim();
+                if (possibleAddress.length > 6) {
                     address = possibleAddress;
                 }
             }
