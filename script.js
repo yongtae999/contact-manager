@@ -314,8 +314,8 @@ function saveContact() {
     const title = document.getElementById('titleInput').value.trim();
     const memo = document.getElementById('memoInput').value.trim();
 
-    if (!name || !phone) {
-        alert("성명과 휴대폰 번호는 필수 입력입니다.");
+    if (!name) {
+        alert("성명은 필수 입력입니다.");
         return;
     }
 
