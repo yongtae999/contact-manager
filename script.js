@@ -77,35 +77,56 @@ function parseBusinessCard(text) {
             }
         }
         
-        // 직급 및 이름 유추 (단순화된 휴리스틱)
-        // 이름은 보통 2~4글자, 직급 키워드 포함 확인
-        const titleKeywords = ['지부장', '국장', '부장', '대리', '주임', '대표', '소장', '팀장', '이사', '직원'];
-        
+        // 소속 유추
+        if (!org && (line.includes('협회') || line.includes('지부') || line.includes('환경청') || line.includes('센터'))) {
+            org = line;
+        }
+
+        // 직급 유추
+        const titleKeywords = ['지부장', '국장', '본부장', '부장', '과장', '대리', '주임', '대표', '소장', '팀장', '이사', '연구원'];
         for (let tk of titleKeywords) {
-            if (line.includes(tk)) {
+            if (line.includes(tk) && !title) {
                 title = tk;
-                // 직급이 포함된 줄에 이름도 있을 확률이 높음 (예: 홍길동 지부장)
-                let possibleName = line.replace(tk, '').replace(/[^가-힣a-zA-Z]/g, '').trim();
-                if (possibleName.length >= 2 && possibleName.length <= 4 && !name) {
+                // 만약 직급과 이름이 한 줄에 붙어있는 경우 (예: 홍길동 지부장)
+                let possibleName = line.replace(tk, '').replace(/[^가-힣]/g, '').trim();
+                if (possibleName.length >= 2 && possibleName.length <= 4 && !possibleName.includes('지부') && !possibleName.includes('협회')) {
                     name = possibleName;
                 }
                 break;
             }
         }
-
-        // 소속 유추 ('협회', '지부', '지회', '청', '부' 등으로 끝나는 단어)
-        if (!org && (line.includes('협회') || line.includes('지부') || line.includes('환경청'))) {
-            org = line;
-        }
     }
 
-    // 이름이 못 찾아졌으면, 보통 글자가 3자인 첫 번째 줄이나 두 번째 줄을 이름으로 추정
+    // 이름을 못 찾았을 때 더 똑똑하게 추론
     if (!name && lines.length > 0) {
+        const skipWords = ['이메일', '팩스', '전화', '모바일', '주소', '직통', '본부', '지부', '지회', '협회', '환경', '대한', '민국', '센터', '사무', '번호', '명함', '기관', '야생', '관리', '텔레'];
+        const koreanSurnames = ['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','전','홍','유','류','고','문','양','손','배','백','허','남','심','노','하','곽','성','차','주','우','구','나','민','진','지','엄','채','원','천','방','공','현','함','변','염','여','추','도','소','석','선','설','마','길','연','위','표','명','기','반','왕','금','옥','육','인','맹','제','모','탁','국','어','은','편','용','남궁','황보','제갈','사공','선우','독고'];
+
+        // 1. 성씨 매칭 시도
         for(let line of lines) {
             let cleanLine = line.replace(/[^가-힣]/g, '');
+            if (skipWords.some(word => line.includes(word))) continue;
+
             if(cleanLine.length >= 2 && cleanLine.length <= 4) {
-                name = cleanLine;
-                break;
+                let firstChar = cleanLine.charAt(0);
+                let firstTwoChars = cleanLine.substring(0, 2);
+                if (koreanSurnames.includes(firstChar) || koreanSurnames.includes(firstTwoChars)) {
+                    name = cleanLine;
+                    break;
+                }
+            }
+        }
+
+        // 2. 성씨 매칭도 실패했다면, 제외 단어가 없는 정확히 3글자인 단어
+        if (!name) {
+            for(let line of lines) {
+                let cleanLine = line.replace(/[^가-힣]/g, '');
+                if (skipWords.some(word => line.includes(word))) continue;
+
+                if(cleanLine.length === 3) {
+                    name = cleanLine;
+                    break;
+                }
             }
         }
     }
