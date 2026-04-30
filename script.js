@@ -53,14 +53,18 @@ async function handleImageUpload(event) {
 function parseBusinessCard(text) {
     let name = "";
     let phone = "";
+    let tel = "";
+    let email = "";
     let org = "";
     let title = "";
 
     // 줄바꿈으로 분리
     const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
 
-    // 1. 휴대폰 번호 찾기 (010-XXXX-XXXX 형식)
+    // 1. 전화번호 및 이메일 정규식
     const phoneRegex = /(010|011|016|017|018|019)[\-\s]*\d{3,4}[\-\s]*\d{4}/;
+    const telRegex = /(02|0[3-6][1-5]|070|050[2-7]|0[8-9]0)[\-\s]*\d{3,4}[\-\s]*\d{4}/;
+    const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/;
     
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
@@ -70,9 +74,33 @@ function parseBusinessCard(text) {
             const phoneMatch = line.match(phoneRegex);
             if (phoneMatch) {
                 phone = phoneMatch[0].replace(/[^0-9]/g, ''); // 숫자만 남기기
-                if(phone.length === 11) {
-                    phone = phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+                if(phone.length === 11) phone = phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+                else if(phone.length === 10) phone = phone.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+                continue;
+            }
+        }
+
+        // 일반전화 추출
+        if (!tel) {
+            const telMatch = line.match(telRegex);
+            if (telMatch) {
+                tel = telMatch[0].replace(/[^0-9]/g, '');
+                if (tel.startsWith('02')) {
+                    if(tel.length === 9) tel = tel.replace(/(\d{2})(\d{3})(\d{4})/, '$1-$2-$3');
+                    else tel = tel.replace(/(\d{2})(\d{4})(\d{4})/, '$1-$2-$3');
+                } else {
+                    if(tel.length === 10) tel = tel.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+                    else tel = tel.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
                 }
+                continue;
+            }
+        }
+
+        // 이메일 추출
+        if (!email) {
+            const emailMatch = line.match(emailRegex);
+            if (emailMatch) {
+                email = emailMatch[0];
                 continue;
             }
         }
@@ -137,6 +165,8 @@ function parseBusinessCard(text) {
     document.getElementById('titleInput').value = title;
     document.getElementById('nameInput').value = name;
     document.getElementById('phoneInput').value = phone;
+    document.getElementById('telInput').value = tel;
+    document.getElementById('emailInput').value = email;
     
     // OCR 알림 메시지 표시
     document.getElementById('ocrNotice').style.display = 'block';
@@ -157,6 +187,8 @@ function openFormModal(editId = null) {
             document.getElementById('titleInput').value = contact.title;
             document.getElementById('nameInput').value = contact.name;
             document.getElementById('phoneInput').value = contact.phone;
+            document.getElementById('telInput').value = contact.tel || '';
+            document.getElementById('emailInput').value = contact.email || '';
         }
     } else {
         document.getElementById('modalTitle').innerText = '새 연락처 추가';
@@ -176,6 +208,8 @@ function saveContact() {
     const id = document.getElementById('contactId').value;
     const name = document.getElementById('nameInput').value.trim();
     const phone = document.getElementById('phoneInput').value.trim();
+    const tel = document.getElementById('telInput').value.trim();
+    const email = document.getElementById('emailInput').value.trim();
     const org = document.getElementById('orgInput').value.trim();
     const title = document.getElementById('titleInput').value.trim();
 
@@ -188,13 +222,13 @@ function saveContact() {
         // 수정
         const index = contacts.findIndex(c => c.id === id);
         if (index > -1) {
-            contacts[index] = { id, name, phone, org, title };
+            contacts[index] = { id, name, phone, tel, email, org, title };
         }
     } else {
         // 신규 추가
         const newContact = {
             id: Date.now().toString(),
-            name, phone, org, title
+            name, phone, tel, email, org, title
         };
         contacts.unshift(newContact); // 최신 항목이 위로
     }
@@ -271,10 +305,12 @@ function exportToExcel() {
     // 데이터를 엑셀 포맷에 맞게 변환
     const dataForExcel = contacts.map((c, index) => ({
         '연번': index + 1,
-        '소속': c.org,
-        '직위': c.title,
-        '성명': c.name,
-        '연락처': c.phone
+        '소속': c.org || '',
+        '직위': c.title || '',
+        '성명': c.name || '',
+        '휴대폰번호': c.phone || '',
+        '일반전화': c.tel || '',
+        '이메일': c.email || ''
     }));
 
     // 워크북 생성
@@ -287,7 +323,9 @@ function exportToExcel() {
         { wch: 20 }, // 소속
         { wch: 10 }, // 직위
         { wch: 15 }, // 성명
-        { wch: 20 }  // 연락처
+        { wch: 18 }, // 휴대폰번호
+        { wch: 18 }, // 일반전화
+        { wch: 25 }  // 이메일
     ];
 
     XLSX.utils.book_append_sheet(wb, ws, "연락처 목록");
