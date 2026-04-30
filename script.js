@@ -16,14 +16,14 @@ async function apiGet(user) {
     return await res.json();
 }
 
-// API POST 요청
+// API POST 요청 (no-cors로 Google Apps Script 리다이렉트 문제 회피)
 async function apiPost(data) {
-    const res = await fetch(SHEETS_API_URL, {
+    await fetch(SHEETS_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        mode: 'no-cors',
         body: JSON.stringify(data)
     });
-    return await res.json();
+    return { success: true };
 }
 
 // 동기화 상태 표시
