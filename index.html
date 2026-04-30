@@ -19,8 +19,11 @@
 
     <!-- 헤더 -->
     <header class="app-header">
-        <div class="header-title">
-            <span class="material-icons-rounded">contacts</span>
+        <div class="header-title" style="display: flex; align-items: center; gap: 4px;">
+            <button onclick="history.back()" class="icon-btn" aria-label="이전으로" style="margin-right: 4px; padding: 4px;">
+                <span class="material-icons-rounded">arrow_back</span>
+            </button>
+            <span class="material-icons-rounded" style="color: var(--primary);">contacts</span>
             <h1>스마트 연락처 관리</h1>
         </div>
         <button class="icon-btn" onclick="exportToExcel()" title="엑셀로 다운로드">
