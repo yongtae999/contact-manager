@@ -47,6 +47,26 @@ body {
     font-weight: 700;
 }
 
+/* 이전 버튼 */
+.back-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    transition: background 0.2s, color 0.2s;
+    margin-right: 4px;
+}
+
+.back-btn:hover {
+    background: var(--bg-color);
+    color: var(--primary-dark);
+}
+
 .icon-btn {
     background: none;
     border: none;
@@ -99,8 +119,27 @@ body {
 }
 
 .action-card h3 {
-    font-size: 16px;
-    margin-bottom: 4px;
+    font-size: 22px;
+    font-weight: 800;
+    margin-bottom: 2px;
+}
+
+.action-card .action-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.6;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.action-card.primary .action-sub {
+    color: rgba(255,255,255,0.5);
+}
+
+.action-card .action-desc {
+    font-size: 13px;
+    color: var(--text-muted);
 }
 
 .action-card p {
@@ -182,7 +221,42 @@ body {
 
 .contact-actions {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.action-text-btn {
+    border: none;
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: inherit;
+    transition: background 0.2s, transform 0.1s;
+    white-space: nowrap;
+}
+
+.action-text-btn:active {
+    transform: scale(0.95);
+}
+
+.action-text-btn.save-btn {
+    background: #e6fcf5;
+    color: var(--primary-dark);
+}
+
+.action-text-btn.save-btn:hover {
+    background: #c3fae8;
+}
+
+.action-text-btn.delete-btn {
+    background: #fff5f5;
+    color: #e03131;
+}
+
+.action-text-btn.delete-btn:hover {
+    background: #ffe3e3;
 }
 
 .contact-actions .call-btn {

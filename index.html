@@ -18,9 +18,7 @@
     <!-- 헤더 -->
     <header class="app-header">
         <div class="header-title" style="display: flex; align-items: center; gap: 4px;">
-            <button onclick="history.back()" class="icon-btn" aria-label="이전으로" style="margin-right: 4px; padding: 4px;">
-                <span class="material-icons-rounded">arrow_back</span>
-            </button>
+            <button onclick="history.back()" class="back-btn" aria-label="이전으로">이전</button>
             <span class="material-icons-rounded" style="color: var(--primary);">contacts</span>
             <h1>스마트 연락처 관리</h1>
         </div>
@@ -37,13 +35,15 @@
             <div class="action-card primary" onclick="document.getElementById('cameraInput').click()">
                 <span class="material-icons-rounded">document_scanner</span>
                 <h3>명함 스캔</h3>
-                <p>사진을 찍어 자동 입력</p>
+                <p class="action-sub">Scan</p>
+                <p class="action-desc">사진을 찍어 자동 입력</p>
             </div>
             <!-- 수동 입력 -->
             <div class="action-card secondary" onclick="openFormModal()">
                 <span class="material-icons-rounded">edit_square</span>
                 <h3>수동 입력</h3>
-                <p>명함 없이 직접 입력</p>
+                <p class="action-sub">Manual</p>
+                <p class="action-desc">명함 없이 직접 입력</p>
             </div>
         </div>
 

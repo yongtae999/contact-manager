@@ -382,12 +382,8 @@ function renderContacts(filterText = '') {
                 </div>
             </div>
             <div class="contact-actions">
-                <button class="icon-btn" onclick="exportVCard('${c.id}')" title="핸드폰 연락처로 저장">
-                    <span class="material-icons-rounded" style="font-size: 20px; color: var(--primary);">person_add</span>
-                </button>
-                <button class="icon-btn" onclick="deleteContact('${c.id}')">
-                    <span class="material-icons-rounded" style="font-size: 20px;">delete</span>
-                </button>
+                <button class="action-text-btn save-btn" onclick="exportVCard('${c.id}')" title="핸드폰 연락처로 저장">폰저장</button>
+                <button class="action-text-btn delete-btn" onclick="deleteContact('${c.id}')">삭제</button>
             </div>
         `;
         listEl.appendChild(card);
