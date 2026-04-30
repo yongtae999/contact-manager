@@ -382,16 +382,48 @@ function renderContacts(filterText = '') {
                 </div>
             </div>
             <div class="contact-actions">
+                <button class="icon-btn" onclick="exportVCard('${c.id}')" title="핸드폰 연락처로 저장">
+                    <span class="material-icons-rounded" style="font-size: 20px; color: var(--primary);">person_add</span>
+                </button>
                 <button class="icon-btn" onclick="deleteContact('${c.id}')">
                     <span class="material-icons-rounded" style="font-size: 20px;">delete</span>
                 </button>
-                <a href="tel:${c.phone}" class="call-btn">
-                    <span class="material-icons-rounded" style="font-size: 20px;">call</span>
-                </a>
             </div>
         `;
         listEl.appendChild(card);
     });
+}
+
+// 핸드폰 연락처로 저장 (vCard 생성)
+function exportVCard(id) {
+    const contact = contacts.find(c => c.id === id);
+    if (!contact) return;
+
+    // vCard 3.0 포맷 생성
+    let vcard = 'BEGIN:VCARD\nVERSION:3.0\n';
+    vcard += `FN:${contact.name}\n`;
+    vcard += `N:${contact.name.substring(0,1)};${contact.name.substring(1)};;;\n`;
+    
+    if (contact.org) vcard += `ORG:${contact.org}\n`;
+    if (contact.title) vcard += `TITLE:${contact.title}\n`;
+    if (contact.phone) vcard += `TEL;TYPE=CELL:${contact.phone.replace(/-/g, '')}\n`;
+    if (contact.tel) vcard += `TEL;TYPE=WORK:${contact.tel.replace(/-/g, '')}\n`;
+    if (contact.email) vcard += `EMAIL:${contact.email}\n`;
+    if (contact.address) vcard += `ADR;TYPE=WORK:;;${contact.address};;;;\n`;
+    if (contact.memo) vcard += `NOTE:${contact.memo}\n`;
+    
+    vcard += 'END:VCARD';
+
+    // .vcf 파일 다운로드 (핸드폰이 자동으로 연락처 앱으로 열어줌)
+    const blob = new Blob([vcard], { type: 'text/vcard;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${contact.name}.vcf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function filterContacts() {
