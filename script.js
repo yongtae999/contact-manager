@@ -20,7 +20,10 @@ function saveToLocal() {
     localStorage.setItem('kowaps_contacts', JSON.stringify(contacts));
 }
 
-// 명함 이미지 업로드 및 OCR 처리
+// ========== Google Cloud Vision API 키 ==========
+const VISION_API_KEY = 'AIzaSyBr7TzIPVuw5f2s9S4owzEKKJh92_ohFzU';
+
+// 명함 이미지 업로드 및 OCR 처리 (Google Cloud Vision API)
 async function handleImageUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -28,42 +31,43 @@ async function handleImageUpload(event) {
     document.getElementById('loadingOverlay').style.display = 'flex';
 
     try {
-        // 1단계: 이미지 전처리 (2배 확대 + 적응형 이진화 + 샤프닝)
-        const processedCanvas = await preprocessImage(file);
+        // 1단계: 이미지를 Base64로 변환
+        const base64Image = await fileToBase64(file);
 
-        // 2단계: 한국어 전용 OCR (한글 인식률 극대화)
-        const korWorker = await Tesseract.createWorker({
-            logger: m => console.log('[KOR]', m.status, Math.round((m.progress||0)*100)+'%')
-        });
-        await korWorker.loadLanguage('kor');
-        await korWorker.initialize('kor');
-        await korWorker.setParameters({
-            tessedit_pageseg_mode: '6',  // PSM 6: 단일 균일 텍스트 블록 (한글 최적)
-        });
-        const korResult = await korWorker.recognize(processedCanvas);
-        await korWorker.terminate();
+        // 2단계: Google Cloud Vision API 호출
+        const response = await fetch(
+            `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    requests: [{
+                        image: { content: base64Image },
+                        features: [{ type: 'TEXT_DETECTION' }]
+                    }]
+                })
+            }
+        );
 
-        // 3단계: 영어 전용 OCR (이메일, URL 등 영문 정확도 확보)
-        const engWorker = await Tesseract.createWorker({
-            logger: m => console.log('[ENG]', m.status, Math.round((m.progress||0)*100)+'%')
-        });
-        await engWorker.loadLanguage('eng');
-        await engWorker.initialize('eng');
-        await engWorker.setParameters({
-            tessedit_pageseg_mode: '6',
-        });
-        const engResult = await engWorker.recognize(processedCanvas);
-        await engWorker.terminate();
-
-        const korText = korResult.data.text;
-        const engText = engResult.data.text;
-        console.log("=== 한국어 OCR 결과 ===\n", korText);
-        console.log("=== 영어 OCR 결과 ===\n", engText);
+        const data = await response.json();
         
-        parseBusinessCard(korText, engText);
+        if (data.error) {
+            throw new Error(data.error.message);
+        }
+
+        const text = data.responses[0]?.fullTextAnnotation?.text || '';
+        console.log("=== Google Vision OCR 결과 ===\n", text);
+
+        if (!text) {
+            alert('명함에서 글자를 찾을 수 없습니다. 직접 입력해주세요.');
+            openFormModal();
+            return;
+        }
+
+        parseBusinessCard(text);
         
     } catch (error) {
-        console.error(error);
+        console.error('Vision API Error:', error);
         alert('명함 인식 중 오류가 발생했습니다. 직접 입력해주세요.');
         openFormModal();
     } finally {
@@ -72,99 +76,22 @@ async function handleImageUpload(event) {
     }
 }
 
-// ========== 이미지 전처리 (2배 확대 + Otsu 적응형 이진화 + 샤프닝) ==========
-function preprocessImage(file) {
-    return new Promise((resolve) => {
-        const img = new Image();
+// 파일을 Base64 문자열로 변환
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (e) => {
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                // ★ 핵심 1: 2배 확대 (Tesseract는 300DPI 이상에서 최적 성능)
-                const SCALE = 2;
-                let width = img.width * SCALE;
-                let height = img.height * SCALE;
-                
-                // 메모리 한계 (최대 4000px)
-                const MAX = 4000;
-                if (width > MAX) {
-                    height = Math.round(height * MAX / width);
-                    width = MAX;
-                }
-                
-                canvas.width = width;
-                canvas.height = height;
-                
-                // 부드러운 확대를 위한 보간 설정
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                const imageData = ctx.getImageData(0, 0, width, height);
-                const data = imageData.data;
-                
-                // ★ 핵심 2: 그레이스케일 변환
-                const gray = new Uint8Array(width * height);
-                for (let i = 0; i < data.length; i += 4) {
-                    gray[i/4] = Math.round(0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2]);
-                }
-                
-                // ★ 핵심 3: Otsu 적응형 이진화 (자동으로 최적 흑백 경계값을 찾아줌)
-                const threshold = otsuThreshold(gray);
-                console.log('Otsu 최적 임계값:', threshold);
-                
-                for (let i = 0; i < gray.length; i++) {
-                    const val = gray[i] < threshold ? 0 : 255; // 완전 흑 or 완전 백
-                    data[i*4] = val;
-                    data[i*4+1] = val;
-                    data[i*4+2] = val;
-                }
-                ctx.putImageData(imageData, 0, 0);
-                
-                resolve(canvas);
-            };
-            img.src = e.target.result;
+        reader.onload = () => {
+            // data:image/jpeg;base64, 부분을 제거하고 순수 base64만 추출
+            const base64 = reader.result.split(',')[1];
+            resolve(base64);
         };
+        reader.onerror = reject;
         reader.readAsDataURL(file);
     });
 }
 
-// Otsu's Method: 히스토그램 기반 최적 이진화 임계값 자동 계산
-function otsuThreshold(grayPixels) {
-    const histogram = new Array(256).fill(0);
-    for (let i = 0; i < grayPixels.length; i++) {
-        histogram[grayPixels[i]]++;
-    }
-    const total = grayPixels.length;
-    let sum = 0;
-    for (let i = 0; i < 256; i++) sum += i * histogram[i];
-    
-    let sumB = 0, wB = 0, wF = 0;
-    let maxVariance = 0, bestThreshold = 0;
-    
-    for (let t = 0; t < 256; t++) {
-        wB += histogram[t];
-        if (wB === 0) continue;
-        wF = total - wB;
-        if (wF === 0) break;
-        
-        sumB += t * histogram[t];
-        const mB = sumB / wB;
-        const mF = (sum - sumB) / wF;
-        const variance = wB * wF * (mB - mF) * (mB - mF);
-        
-        if (variance > maxVariance) {
-            maxVariance = variance;
-            bestThreshold = t;
-        }
-    }
-    return bestThreshold;
-}
-
-// ========== OCR 텍스트 파싱 (한국어 결과 + 영어 결과 병합) ==========
-function parseBusinessCard(korText, engText) {
+// ========== OCR 텍스트 파싱 ==========
+function parseBusinessCard(text) {
     let name = "";
     let phone = "";
     let tel = "";
@@ -173,16 +100,11 @@ function parseBusinessCard(korText, engText) {
     let title = "";
     let address = "";
 
-    // ---- 영문 결과에서 이메일 우선 추출 (영어 OCR이 정확) ----
+    // ---- 이메일 우선 추출 ----
     const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/;
-    const engLines = engText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    for (const line of engLines) {
-        const m = line.match(emailRegex);
-        if (m) { email = m[0]; break; }
-    }
 
-    // ---- 한국어 결과에서 나머지 필드 추출 ----
-    const lines = korText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    // ---- 텍스트에서 각 필드 추출 ----
+    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
 
     // 전화번호 정규식 (숫자 사이의 공백이나 특수문자 포괄적으로 처리)
     const phoneRegex = /(010|011|016|017|018|019)[\s\-\.]*\d{3,4}[\s\-\.]*\d{4}/;
