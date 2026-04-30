@@ -25,43 +25,54 @@ async function handleImageUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    // 로딩 화면 표시
     document.getElementById('loadingOverlay').style.display = 'flex';
 
     try {
-        // 이미지 전처리 (흑백 변환 및 대비 극대화로 인식률 대폭 향상)
+        // 1단계: 이미지 전처리 (2배 확대 + 적응형 이진화 + 샤프닝)
         const processedCanvas = await preprocessImage(file);
 
-        // Worker 생성 및 명함 최적화 모드(PSM 11) 적용
-        const worker = await Tesseract.createWorker({
-            logger: m => console.log(m)
+        // 2단계: 한국어 전용 OCR (한글 인식률 극대화)
+        const korWorker = await Tesseract.createWorker({
+            logger: m => console.log('[KOR]', m.status, Math.round((m.progress||0)*100)+'%')
         });
-        await worker.loadLanguage('kor+eng');
-        await worker.initialize('kor+eng');
-        // PSM 11 (SPARSE_TEXT): 흩어진 텍스트를 가장 잘 읽는 모드 (명함, 영수증 최적화)
-        await worker.setParameters({
-            tessedit_pageseg_mode: '11',
+        await korWorker.loadLanguage('kor');
+        await korWorker.initialize('kor');
+        await korWorker.setParameters({
+            tessedit_pageseg_mode: '6',  // PSM 6: 단일 균일 텍스트 블록 (한글 최적)
         });
-        
-        const result = await worker.recognize(processedCanvas);
-        const text = result.data.text;
-        await worker.terminate();
+        const korResult = await korWorker.recognize(processedCanvas);
+        await korWorker.terminate();
 
-        console.log("추출된 텍스트:\n", text);
+        // 3단계: 영어 전용 OCR (이메일, URL 등 영문 정확도 확보)
+        const engWorker = await Tesseract.createWorker({
+            logger: m => console.log('[ENG]', m.status, Math.round((m.progress||0)*100)+'%')
+        });
+        await engWorker.loadLanguage('eng');
+        await engWorker.initialize('eng');
+        await engWorker.setParameters({
+            tessedit_pageseg_mode: '6',
+        });
+        const engResult = await engWorker.recognize(processedCanvas);
+        await engWorker.terminate();
+
+        const korText = korResult.data.text;
+        const engText = engResult.data.text;
+        console.log("=== 한국어 OCR 결과 ===\n", korText);
+        console.log("=== 영어 OCR 결과 ===\n", engText);
         
-        parseBusinessCard(text);
+        parseBusinessCard(korText, engText);
         
     } catch (error) {
         console.error(error);
         alert('명함 인식 중 오류가 발생했습니다. 직접 입력해주세요.');
-        openFormModal(); // 실패시 직접 입력창 띄움
+        openFormModal();
     } finally {
         document.getElementById('loadingOverlay').style.display = 'none';
-        event.target.value = ''; // 입력 초기화
+        event.target.value = '';
     }
 }
 
-// 이미지 전처리 함수 (Canvas API 활용)
+// ========== 이미지 전처리 (2배 확대 + Otsu 적응형 이진화 + 샤프닝) ==========
 function preprocessImage(file) {
     return new Promise((resolve) => {
         const img = new Image();
@@ -71,41 +82,47 @@ function preprocessImage(file) {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 
-                // 해상도 최적화 (가로 1200px 기준)
-                let width = img.width;
-                let height = img.height;
-                const MAX_WIDTH = 1200;
+                // ★ 핵심 1: 2배 확대 (Tesseract는 300DPI 이상에서 최적 성능)
+                const SCALE = 2;
+                let width = img.width * SCALE;
+                let height = img.height * SCALE;
                 
-                if (width > MAX_WIDTH) {
-                    height = Math.round((height *= MAX_WIDTH / width));
-                    width = MAX_WIDTH;
+                // 메모리 한계 (최대 4000px)
+                const MAX = 4000;
+                if (width > MAX) {
+                    height = Math.round(height * MAX / width);
+                    width = MAX;
                 }
                 
                 canvas.width = width;
                 canvas.height = height;
+                
+                // 부드러운 확대를 위한 보간 설정
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // 픽셀 데이터 조작 (흑백 변환 및 명암 대비 1.5배 증가)
                 const imageData = ctx.getImageData(0, 0, width, height);
                 const data = imageData.data;
-                const contrast = 1.5;
-                const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
-
+                
+                // ★ 핵심 2: 그레이스케일 변환
+                const gray = new Uint8Array(width * height);
                 for (let i = 0; i < data.length; i += 4) {
-                    // 1. Grayscale
-                    const avg = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-                    
-                    // 2. Contrast
-                    let color = factor * (avg - 128) + 128;
-                    color = Math.min(255, Math.max(0, color));
-                    
-                    data[i] = color;     // R
-                    data[i+1] = color;   // G
-                    data[i+2] = color;   // B
+                    gray[i/4] = Math.round(0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2]);
+                }
+                
+                // ★ 핵심 3: Otsu 적응형 이진화 (자동으로 최적 흑백 경계값을 찾아줌)
+                const threshold = otsuThreshold(gray);
+                console.log('Otsu 최적 임계값:', threshold);
+                
+                for (let i = 0; i < gray.length; i++) {
+                    const val = gray[i] < threshold ? 0 : 255; // 완전 흑 or 완전 백
+                    data[i*4] = val;
+                    data[i*4+1] = val;
+                    data[i*4+2] = val;
                 }
                 ctx.putImageData(imageData, 0, 0);
                 
-                // Tesseract가 인식하기 가장 좋은 흑백/고대비 Canvas 반환
                 resolve(canvas);
             };
             img.src = e.target.result;
@@ -114,18 +131,40 @@ function preprocessImage(file) {
     });
 }
 
-// OCR 텍스트 파싱 로직 (정규식 기반)
-function parseBusinessCard(text) {
-    // 흔한 OCR 한글 인식 오류 보정
-    text = text.replace(/0l0|O1O|o1o|oIO/g, '010')
-               .replace(/협희|합회|헙회|협하/g, '협회')
-               .replace(/지투장|지무장|지부징/g, '지부장')
-               .replace(/환걍|환경청|환겸/g, '환경')
-               .replace(/대리|데리/g, '대리')
-               .replace(/과징|과장/g, '과장')
-               .replace(/부징/g, '부장')
-               .replace(/으도겨|우둥걸|오동걸|으동걸/g, '우동걸');
+// Otsu's Method: 히스토그램 기반 최적 이진화 임계값 자동 계산
+function otsuThreshold(grayPixels) {
+    const histogram = new Array(256).fill(0);
+    for (let i = 0; i < grayPixels.length; i++) {
+        histogram[grayPixels[i]]++;
+    }
+    const total = grayPixels.length;
+    let sum = 0;
+    for (let i = 0; i < 256; i++) sum += i * histogram[i];
+    
+    let sumB = 0, wB = 0, wF = 0;
+    let maxVariance = 0, bestThreshold = 0;
+    
+    for (let t = 0; t < 256; t++) {
+        wB += histogram[t];
+        if (wB === 0) continue;
+        wF = total - wB;
+        if (wF === 0) break;
+        
+        sumB += t * histogram[t];
+        const mB = sumB / wB;
+        const mF = (sum - sumB) / wF;
+        const variance = wB * wF * (mB - mF) * (mB - mF);
+        
+        if (variance > maxVariance) {
+            maxVariance = variance;
+            bestThreshold = t;
+        }
+    }
+    return bestThreshold;
+}
 
+// ========== OCR 텍스트 파싱 (한국어 결과 + 영어 결과 병합) ==========
+function parseBusinessCard(korText, engText) {
     let name = "";
     let phone = "";
     let tel = "";
@@ -134,14 +173,37 @@ function parseBusinessCard(text) {
     let title = "";
     let address = "";
 
-    // 줄바꿈으로 분리
-    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-
-    // 1. 전화번호 및 이메일 정규식
-    const phoneRegex = /(010|011|016|017|018|019)[\-\s]*\d{3,4}[\-\s]*\d{4}/;
-    const telRegex = /(02|0[3-6][1-5]|070|050[2-7]|0[8-9]0)[\-\s]*\d{3,4}[\-\s]*\d{4}/;
+    // ---- 영문 결과에서 이메일 우선 추출 (영어 OCR이 정확) ----
     const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/;
+    const engLines = engText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    for (const line of engLines) {
+        const m = line.match(emailRegex);
+        if (m) { email = m[0]; break; }
+    }
+
+    // ---- 한국어 결과에서 나머지 필드 추출 ----
+    const lines = korText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+    // 전화번호 정규식 (숫자 사이의 공백이나 특수문자 포괄적으로 처리)
+    const phoneRegex = /(010|011|016|017|018|019)[\s\-\.]*\d{3,4}[\s\-\.]*\d{4}/;
+    const telRegex = /(02|0[3-6][1-5]|070|050[2-7]|0[8-9]0)[\s\-\.]*\d{3,4}[\s\-\.]*\d{4}/;
     
+    // 주소 키워드
+    const addrKeywords = ['특별시','광역시','자치시','자치도','세종','경기','강원','충북','충남','전북','전남','경북','경남','제주','서울','부산','대구','인천','광주','대전','울산'];
+    const addrSuffixes = ['도','시','군','구','읍','면','동','리','로','길','대로','번길','가'];
+    
+    // 이름/주소가 아닌 것으로 분류할 키워드
+    const skipForName = ['이메일','팩스','전화','모바일','주소','직통','본부','지부','지회','협회','환경','대한','민국','센터','사무','번호','명함','기관','야생','관리','텔레','인터넷','홈페이지','우편','사업자','카카오','법인','등록','www','http','@','fax','tel','e-mail','mail','phone','mobile','add','홍보','기획','총무','교육','대표번호'];
+    
+    // 소속 키워드
+    const orgKeywords = ['협회','지부','환경청','센터','공사','공단','재단','연구원','연구소','대학','학교','병원','은행','(주)','주식회사','유한회사','법인','기관','청','부','처','원','실','과','팀','단'];
+    
+    // 직급 키워드
+    const titleKeywords = ['회장','부회장','이사장','이사','감사','지부장','국장','본부장','부장','차장','과장','대리','주임','사원','대표','소장','팀장','연구원','실장','센터장','관장','교수','박사','원장','처장','계장','주사','서기','사무관','사무국장','총무'];
+
+    // 한국인 성씨 (인식률 관계없이 패턴 매칭용)
+    const koreanSurnames = ['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','전','홍','유','류','고','문','양','손','배','백','허','남','심','노','하','곽','성','차','주','우','구','나','민','진','지','엄','채','원','천','방','공','현','함','변','염','여','추','도','소','석','선','설','마','길','연','위','표','명','기','반','왕','금','옥','육','인','맹','제','모','탁','국','어','은','편','용','남궁','황보','제갈','사공','선우','독고'];
+
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
         
@@ -149,7 +211,7 @@ function parseBusinessCard(text) {
         if (!phone) {
             const phoneMatch = line.match(phoneRegex);
             if (phoneMatch) {
-                phone = phoneMatch[0].replace(/[^0-9]/g, ''); // 숫자만 남기기
+                phone = phoneMatch[0].replace(/[^0-9]/g, '');
                 if(phone.length === 11) phone = phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
                 else if(phone.length === 10) phone = phone.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
                 continue;
@@ -172,73 +234,97 @@ function parseBusinessCard(text) {
             }
         }
 
-        // 이메일 추출
+        // 이메일 (한국어 결과에서도 시도)
         if (!email) {
             const emailMatch = line.match(emailRegex);
-            if (emailMatch) {
-                email = emailMatch[0];
-                continue;
-            }
+            if (emailMatch) { email = emailMatch[0]; continue; }
         }
         
-        // 주소 추출 좀 더 넓게
+        // ★ 주소 추출 (대폭 강화)
         if (!address) {
-            const addrKeywords = ['특별시', '광역시', '도 ', '시 ', '군 ', '구 ', '동 ', '읍 ', '면 ', '로 ', '길 ', '번길', '빌딩', '타워', '지하', '층 ', '대로'];
-            if ((addrKeywords.some(kw => line.includes(kw)) && line.length > 8 && /\d/.test(line)) || line.match(/[가-힣]+[도시군구]\s+[가-힣]+[동읍면리로길]/)) {
-                let possibleAddress = line.replace(/^(주소|Add|Address|A|우편|지번|도로명|본부|지부)\s*[:\-\.]?\s*/i, '').trim();
-                if (possibleAddress.length > 6) {
-                    address = possibleAddress;
-                }
+            const lineForAddr = line.replace(/^(주소|Add|Address|addr|우편번호)\s*[:\-\.]?\s*/i, '').trim();
+            const hasAddrKeyword = addrKeywords.some(kw => lineForAddr.includes(kw));
+            const hasAddrSuffix = addrSuffixes.some(sf => lineForAddr.includes(sf));
+            const hasNumber = /\d/.test(lineForAddr);
+            
+            // 조건: (광역 키워드 포함) 또는 (주소 접미사 2개 이상 + 숫자)
+            const suffixCount = addrSuffixes.filter(sf => lineForAddr.includes(sf)).length;
+            if ((hasAddrKeyword && lineForAddr.length > 5) || (suffixCount >= 2 && hasNumber && lineForAddr.length > 6)) {
+                address = lineForAddr;
+                continue;
             }
         }
 
         // 소속 유추
-        if (!org && (line.includes('협회') || line.includes('지부') || line.includes('환경청') || line.includes('센터'))) {
-            org = line;
+        if (!org) {
+            if (orgKeywords.some(kw => line.includes(kw)) && line.length <= 30) {
+                org = line;
+            }
         }
 
-        // 직급 유추
-        const titleKeywords = ['지부장', '국장', '본부장', '부장', '과장', '대리', '주임', '대표', '소장', '팀장', '이사', '연구원'];
+        // ★ 직급 유추 (상위에 정의된 titleKeywords 사용)
         for (let tk of titleKeywords) {
             if (line.includes(tk) && !title) {
                 title = tk;
-                // 만약 직급과 이름이 한 줄에 붙어있는 경우 (예: 홍길동 지부장)
+                // 직급과 이름이 한 줄에 있는 경우 (예: "홍길동 지부장", "지부장 홍길동")
                 let possibleName = line.replace(tk, '').replace(/[^가-힣]/g, '').trim();
-                if (possibleName.length >= 2 && possibleName.length <= 4 && !possibleName.includes('지부') && !possibleName.includes('협회')) {
-                    name = possibleName;
+                if (possibleName.length >= 2 && possibleName.length <= 4) {
+                    // 소속/주소 관련 단어가 아닌지 확인
+                    const isNotName = skipForName.some(w => possibleName.includes(w)) || 
+                                      orgKeywords.some(w => possibleName.includes(w)) ||
+                                      addrKeywords.some(w => possibleName.includes(w));
+                    if (!isNotName) {
+                        name = possibleName;
+                    }
                 }
                 break;
             }
         }
     }
 
-    // 이름을 못 찾았을 때 더 똑똑하게 추론
+    // ★ 이름을 못 찾았을 때 더 똑똑하게 추론
     if (!name && lines.length > 0) {
-        const skipWords = ['이메일', '팩스', '전화', '모바일', '주소', '직통', '본부', '지부', '지회', '협회', '환경', '대한', '민국', '센터', '사무', '번호', '명함', '기관', '야생', '관리', '텔레'];
-        const koreanSurnames = ['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','전','홍','유','류','고','문','양','손','배','백','허','남','심','노','하','곽','성','차','주','우','구','나','민','진','지','엄','채','원','천','방','공','현','함','변','염','여','추','도','소','석','선','설','마','길','연','위','표','명','기','반','왕','금','옥','육','인','맹','제','모','탁','국','어','은','편','용','남궁','황보','제갈','사공','선우','독고'];
-
-        // 1. 성씨 매칭 시도
-        for(let line of lines) {
+        // 이미 추출된 정보에 해당하는 줄은 건너뛰기
+        const usedTexts = [phone, tel, email, org, title, address].filter(v => v);
+        
+        // 1단계: 성씨 + 2~3글자 매칭 (가장 정확한 방법)
+        for (let line of lines) {
+            // 이미 다른 필드로 사용된 줄이면 건너뛰기
+            if (usedTexts.some(t => line.includes(t))) continue;
+            
+            // 전화번호, 이메일, 숫자가 포함된 줄 건너뛰기
+            if (/\d/.test(line) || /@/.test(line)) continue;
+            
+            // 제외 키워드가 포함된 줄 건너뛰기
+            if (skipForName.some(word => line.toLowerCase().includes(word))) continue;
+            if (orgKeywords.some(word => line.includes(word))) continue;
+            if (addrKeywords.some(word => line.includes(word))) continue;
+            if (addrSuffixes.some(sf => line.includes(sf) && line.length > 5)) continue;
+            
             let cleanLine = line.replace(/[^가-힣]/g, '');
-            if (skipWords.some(word => line.includes(word))) continue;
-
-            if(cleanLine.length >= 2 && cleanLine.length <= 4) {
+            
+            if (cleanLine.length >= 2 && cleanLine.length <= 4) {
                 let firstChar = cleanLine.charAt(0);
                 let firstTwoChars = cleanLine.substring(0, 2);
-                if (koreanSurnames.includes(firstChar) || koreanSurnames.includes(firstTwoChars)) {
+                if (koreanSurnames.includes(firstTwoChars) || koreanSurnames.includes(firstChar)) {
                     name = cleanLine;
                     break;
                 }
             }
         }
 
-        // 2. 성씨 매칭도 실패했다면, 제외 단어가 없는 정확히 3글자인 단어
+        // 2단계: 성씨 매칭 실패 시, 순수 한글 2~3글자 단어 찾기
         if (!name) {
-            for(let line of lines) {
+            for (let line of lines) {
+                if (usedTexts.some(t => line.includes(t))) continue;
+                if (/\d/.test(line) || /@/.test(line)) continue;
+                if (skipForName.some(word => line.toLowerCase().includes(word))) continue;
+                if (orgKeywords.some(word => line.includes(word))) continue;
+                if (addrKeywords.some(word => line.includes(word))) continue;
+                if (titleKeywords.some(word => line.includes(word))) continue;
+                
                 let cleanLine = line.replace(/[^가-힣]/g, '');
-                if (skipWords.some(word => line.includes(word))) continue;
-
-                if(cleanLine.length === 3) {
+                if (cleanLine.length >= 2 && cleanLine.length <= 4) {
                     name = cleanLine;
                     break;
                 }
