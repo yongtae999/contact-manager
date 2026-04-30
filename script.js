@@ -51,12 +51,22 @@ async function handleImageUpload(event) {
 
 // OCR 텍스트 파싱 로직 (정규식 기반)
 function parseBusinessCard(text) {
+    // 흔한 OCR 한글 인식 오류 보정
+    text = text.replace(/0l0|O1O|o1o|oIO/g, '010')
+               .replace(/협희|합회|헙회|협하/g, '협회')
+               .replace(/지투장|지무장|지부징/g, '지부장')
+               .replace(/환걍|환경청|환겸/g, '환경')
+               .replace(/대리|데리/g, '대리')
+               .replace(/과징|과장/g, '과장')
+               .replace(/부징|부장/g, '부장');
+
     let name = "";
     let phone = "";
     let tel = "";
     let email = "";
     let org = "";
     let title = "";
+    let address = "";
 
     // 줄바꿈으로 분리
     const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
@@ -105,6 +115,16 @@ function parseBusinessCard(text) {
             }
         }
         
+        // 주소 추출 (시/도/군/구/동/로/길 패턴)
+        if (!address) {
+            if (line.includes('특별시') || line.includes('광역시') || line.match(/[가-힣]+[도시군구]\s+[가-힣]+[동읍면리로길]/)) {
+                let possibleAddress = line.replace(/^(주소|Add|Address|A)\s*[:]?\s*/i, '').trim();
+                if (possibleAddress.length > 5) {
+                    address = possibleAddress;
+                }
+            }
+        }
+
         // 소속 유추
         if (!org && (line.includes('협회') || line.includes('지부') || line.includes('환경청') || line.includes('센터'))) {
             org = line;
@@ -167,6 +187,7 @@ function parseBusinessCard(text) {
     document.getElementById('phoneInput').value = phone;
     document.getElementById('telInput').value = tel;
     document.getElementById('emailInput').value = email;
+    document.getElementById('addressInput').value = address;
     document.getElementById('memoInput').value = '';
     
     // OCR 알림 메시지 표시
@@ -190,6 +211,7 @@ function openFormModal(editId = null) {
             document.getElementById('phoneInput').value = contact.phone;
             document.getElementById('telInput').value = contact.tel || '';
             document.getElementById('emailInput').value = contact.email || '';
+            document.getElementById('addressInput').value = contact.address || '';
             document.getElementById('memoInput').value = contact.memo || '';
         }
     } else {
@@ -212,6 +234,7 @@ function saveContact() {
     const phone = document.getElementById('phoneInput').value.trim();
     const tel = document.getElementById('telInput').value.trim();
     const email = document.getElementById('emailInput').value.trim();
+    const address = document.getElementById('addressInput').value.trim();
     const org = document.getElementById('orgInput').value.trim();
     const title = document.getElementById('titleInput').value.trim();
     const memo = document.getElementById('memoInput').value.trim();
@@ -225,13 +248,13 @@ function saveContact() {
         // 수정
         const index = contacts.findIndex(c => c.id === id);
         if (index > -1) {
-            contacts[index] = { id, name, phone, tel, email, org, title, memo };
+            contacts[index] = { id, name, phone, tel, email, address, org, title, memo };
         }
     } else {
         // 신규 추가
         const newContact = {
             id: Date.now().toString(),
-            name, phone, tel, email, org, title, memo
+            name, phone, tel, email, address, org, title, memo
         };
         contacts.unshift(newContact); // 최신 항목이 위로
     }
@@ -317,6 +340,7 @@ function exportToExcel() {
         '휴대폰번호': c.phone || '',
         '일반전화': c.tel || '',
         '이메일': c.email || '',
+        '주소': c.address || '',
         '비고(메모)': c.memo || ''
     }));
 
@@ -333,6 +357,7 @@ function exportToExcel() {
         { wch: 18 }, // 휴대폰번호
         { wch: 18 }, // 일반전화
         { wch: 25 }, // 이메일
+        { wch: 40 }, // 주소
         { wch: 30 }  // 비고(메모)
     ];
 
