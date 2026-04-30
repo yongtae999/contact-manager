@@ -32,12 +32,21 @@ async function handleImageUpload(event) {
         // 이미지 전처리 (흑백 변환 및 대비 극대화로 인식률 대폭 향상)
         const processedCanvas = await preprocessImage(file);
 
-        // Tesseract.js를 사용하여 전처리된 이미지에서 텍스트 추출
-        const result = await Tesseract.recognize(processedCanvas, 'kor+eng', {
-            logger: m => console.log(m) // 진행상황 로그
+        // Worker 생성 및 명함 최적화 모드(PSM 11) 적용
+        const worker = await Tesseract.createWorker({
+            logger: m => console.log(m)
         });
-
+        await worker.loadLanguage('kor+eng');
+        await worker.initialize('kor+eng');
+        // PSM 11 (SPARSE_TEXT): 흩어진 텍스트를 가장 잘 읽는 모드 (명함, 영수증 최적화)
+        await worker.setParameters({
+            tessedit_pageseg_mode: '11',
+        });
+        
+        const result = await worker.recognize(processedCanvas);
         const text = result.data.text;
+        await worker.terminate();
+
         console.log("추출된 텍스트:\n", text);
         
         parseBusinessCard(text);
