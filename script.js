@@ -1,21 +1,90 @@
+// ========== Google Sheets API 연동 설정 ==========
+const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbyDLThF2R4aY8gwILf7ChUpcnOY6OHJS26-RnDaVfCRGYOkG9Zfi9c_BSJCkH0G0S9WzQ/exec';
+
 // 상태 관리
 let contacts = [];
+let currentUser = '';
+
+// 현재 로그인 사용자 가져오기 (task-assistant에서 설정됨)
+function getCurrentUser() {
+    return localStorage.getItem('username') || '';
+}
+
+// API GET 요청
+async function apiGet(user) {
+    const res = await fetch(`${SHEETS_API_URL}?action=get&user=${encodeURIComponent(user)}`);
+    return await res.json();
+}
+
+// API POST 요청
+async function apiPost(data) {
+    const res = await fetch(SHEETS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(data)
+    });
+    return await res.json();
+}
+
+// 동기화 상태 표시
+function showSyncStatus(msg, autoHide = false) {
+    let el = document.getElementById('syncStatus');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'syncStatus';
+        el.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#212529;color:#fff;padding:10px 20px;border-radius:24px;font-size:13px;z-index:999;transition:opacity 0.3s;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+        document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.opacity = '1';
+    el.style.display = msg ? 'block' : 'none';
+    if (autoHide) {
+        setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.style.display = 'none', 300); }, 2000);
+    }
+}
 
 // 초기화
-document.addEventListener('DOMContentLoaded', () => {
-    loadContacts();
+document.addEventListener('DOMContentLoaded', async () => {
+    currentUser = getCurrentUser();
+    loadContactsFromLocal();
     renderContacts();
+    await syncFromCloud();
 });
 
-// 연락처 로컬 스토리지에서 불러오기
-function loadContacts() {
+// 클라우드에서 동기화
+async function syncFromCloud() {
+    if (!currentUser) return; // 로그인 안 된 경우 localStorage만 사용
+    try {
+        showSyncStatus('☁️ 동기화 중...');
+        const result = await apiGet(currentUser);
+        if (result.contacts && result.contacts.length > 0) {
+            contacts = result.contacts;
+            saveToLocal();
+            renderContacts();
+            showSyncStatus('✓ 동기화 완료', true);
+        } else if (contacts.length > 0) {
+            // API에 데이터 없고 로컬에 있으면 → 최초 업로드
+            showSyncStatus('☁️ 기존 데이터 업로드 중...');
+            await apiPost({ action: 'sync', user: currentUser, contacts: contacts });
+            showSyncStatus('✓ 업로드 완료', true);
+        } else {
+            showSyncStatus('', true);
+        }
+    } catch (err) {
+        console.error('API 연결 실패:', err);
+        showSyncStatus('⚡ 오프라인 모드', true);
+    }
+}
+
+// 연락처 로컬 스토리지에서 불러오기 (캐시)
+function loadContactsFromLocal() {
     const saved = localStorage.getItem('kowaps_contacts');
     if (saved) {
         contacts = JSON.parse(saved);
     }
 }
 
-// 연락처 로컬 스토리지에 저장하기
+// 연락처 로컬 스토리지에 저장하기 (캐시)
 function saveToLocal() {
     localStorage.setItem('kowaps_contacts', JSON.stringify(contacts));
 }
@@ -319,24 +388,31 @@ function saveContact() {
         return;
     }
 
+    let contactToSave;
     if (id) {
-        // 수정
         const index = contacts.findIndex(c => c.id === id);
         if (index > -1) {
             contacts[index] = { id, name, phone, tel, email, address, org, title, memo };
+            contactToSave = contacts[index];
         }
     } else {
-        // 신규 추가
-        const newContact = {
+        contactToSave = {
             id: Date.now().toString(),
             name, phone, tel, email, address, org, title, memo
         };
-        contacts.unshift(newContact); // 최신 항목이 위로
+        contacts.unshift(contactToSave);
     }
 
     saveToLocal();
     renderContacts();
     closeFormModal();
+
+    // 클라우드에 비동기 저장
+    if (currentUser && contactToSave) {
+        apiPost({ action: 'save', user: currentUser, contact: contactToSave })
+            .then(() => showSyncStatus('✓ 클라우드 저장 완료', true))
+            .catch(() => showSyncStatus('⚡ 클라우드 저장 실패 (로컬 저장됨)', true));
+    }
 }
 
 // 연락처 삭제
@@ -345,6 +421,13 @@ function deleteContact(id) {
         contacts = contacts.filter(c => c.id !== id);
         saveToLocal();
         renderContacts();
+
+        // 클라우드에서도 삭제
+        if (currentUser) {
+            apiPost({ action: 'delete', user: currentUser, contactId: id })
+                .then(() => showSyncStatus('✓ 클라우드 삭제 완료', true))
+                .catch(() => showSyncStatus('⚡ 클라우드 삭제 실패', true));
+        }
     }
 }
 
