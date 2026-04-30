@@ -278,7 +278,10 @@ function renderContacts(filterText = '') {
             <div class="contact-info" onclick="openFormModal('${c.id}')" style="flex:1; cursor:pointer;">
                 <div class="org">${fullOrg || '소속 없음'}</div>
                 <div class="name">${c.name}</div>
-                <div class="phone">${c.phone}</div>
+                <div class="phone" style="margin-top: 6px;">
+                    ${c.phone ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" style="text-decoration:none; color:#0ca678; font-weight:700; font-size:15px; margin-right:12px; display:inline-block; padding:2px 0;"><span class="material-icons-rounded" style="font-size:14px; vertical-align:middle;">smartphone</span> ${c.phone}</a>` : ''}
+                    ${c.tel ? `<a href="tel:${c.tel}" onclick="event.stopPropagation()" style="text-decoration:none; color:#868e96; font-weight:500; font-size:14px; display:inline-block; padding:2px 0;"><span class="material-icons-rounded" style="font-size:14px; vertical-align:middle;">call</span> ${c.tel}</a>` : ''}
+                </div>
             </div>
             <div class="contact-actions">
                 <button class="icon-btn" onclick="deleteContact('${c.id}')">
