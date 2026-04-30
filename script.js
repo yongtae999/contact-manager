@@ -1,0 +1,281 @@
+// 상태 관리
+let contacts = [];
+
+// 초기화
+document.addEventListener('DOMContentLoaded', () => {
+    loadContacts();
+    renderContacts();
+});
+
+// 연락처 로컬 스토리지에서 불러오기
+function loadContacts() {
+    const saved = localStorage.getItem('kowaps_contacts');
+    if (saved) {
+        contacts = JSON.parse(saved);
+    }
+}
+
+// 연락처 로컬 스토리지에 저장하기
+function saveToLocal() {
+    localStorage.setItem('kowaps_contacts', JSON.stringify(contacts));
+}
+
+// 명함 이미지 업로드 및 OCR 처리
+async function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // 로딩 화면 표시
+    document.getElementById('loadingOverlay').style.display = 'flex';
+
+    try {
+        // Tesseract.js를 사용하여 이미지에서 텍스트 추출 (한국어 + 영어)
+        const result = await Tesseract.recognize(file, 'kor+eng', {
+            logger: m => console.log(m) // 진행상황 로그
+        });
+
+        const text = result.data.text;
+        console.log("추출된 텍스트:\n", text);
+        
+        parseBusinessCard(text);
+        
+    } catch (error) {
+        console.error(error);
+        alert('명함 인식 중 오류가 발생했습니다. 직접 입력해주세요.');
+        openFormModal(); // 실패시 직접 입력창 띄움
+    } finally {
+        document.getElementById('loadingOverlay').style.display = 'none';
+        event.target.value = ''; // 입력 초기화
+    }
+}
+
+// OCR 텍스트 파싱 로직 (정규식 기반)
+function parseBusinessCard(text) {
+    let name = "";
+    let phone = "";
+    let org = "";
+    let title = "";
+
+    // 줄바꿈으로 분리
+    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+    // 1. 휴대폰 번호 찾기 (010-XXXX-XXXX 형식)
+    const phoneRegex = /(010|011|016|017|018|019)[\-\s]*\d{3,4}[\-\s]*\d{4}/;
+    
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        
+        // 휴대폰 추출
+        if (!phone) {
+            const phoneMatch = line.match(phoneRegex);
+            if (phoneMatch) {
+                phone = phoneMatch[0].replace(/[^0-9]/g, ''); // 숫자만 남기기
+                if(phone.length === 11) {
+                    phone = phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+                }
+                continue;
+            }
+        }
+        
+        // 직급 및 이름 유추 (단순화된 휴리스틱)
+        // 이름은 보통 2~4글자, 직급 키워드 포함 확인
+        const titleKeywords = ['지부장', '국장', '부장', '대리', '주임', '대표', '소장', '팀장', '이사', '직원'];
+        
+        for (let tk of titleKeywords) {
+            if (line.includes(tk)) {
+                title = tk;
+                // 직급이 포함된 줄에 이름도 있을 확률이 높음 (예: 홍길동 지부장)
+                let possibleName = line.replace(tk, '').replace(/[^가-힣a-zA-Z]/g, '').trim();
+                if (possibleName.length >= 2 && possibleName.length <= 4 && !name) {
+                    name = possibleName;
+                }
+                break;
+            }
+        }
+
+        // 소속 유추 ('협회', '지부', '지회', '청', '부' 등으로 끝나는 단어)
+        if (!org && (line.includes('협회') || line.includes('지부') || line.includes('환경청'))) {
+            org = line;
+        }
+    }
+
+    // 이름이 못 찾아졌으면, 보통 글자가 3자인 첫 번째 줄이나 두 번째 줄을 이름으로 추정
+    if (!name && lines.length > 0) {
+        for(let line of lines) {
+            let cleanLine = line.replace(/[^가-힣]/g, '');
+            if(cleanLine.length >= 2 && cleanLine.length <= 4) {
+                name = cleanLine;
+                break;
+            }
+        }
+    }
+
+    // 폼 열고 파싱된 데이터 채우기
+    openFormModal();
+    document.getElementById('orgInput').value = org;
+    document.getElementById('titleInput').value = title;
+    document.getElementById('nameInput').value = name;
+    document.getElementById('phoneInput').value = phone;
+    
+    // OCR 알림 메시지 표시
+    document.getElementById('ocrNotice').style.display = 'block';
+}
+
+// UI 헬퍼
+function openFormModal(editId = null) {
+    const modal = document.getElementById('formModal');
+    const form = document.getElementById('contactForm');
+    document.getElementById('ocrNotice').style.display = 'none';
+    
+    if (editId) {
+        document.getElementById('modalTitle').innerText = '연락처 수정';
+        const contact = contacts.find(c => c.id === editId);
+        if (contact) {
+            document.getElementById('contactId').value = contact.id;
+            document.getElementById('orgInput').value = contact.org;
+            document.getElementById('titleInput').value = contact.title;
+            document.getElementById('nameInput').value = contact.name;
+            document.getElementById('phoneInput').value = contact.phone;
+        }
+    } else {
+        document.getElementById('modalTitle').innerText = '새 연락처 추가';
+        form.reset();
+        document.getElementById('contactId').value = '';
+    }
+    
+    modal.style.display = 'flex';
+}
+
+function closeFormModal() {
+    document.getElementById('formModal').style.display = 'none';
+}
+
+// 연락처 저장
+function saveContact() {
+    const id = document.getElementById('contactId').value;
+    const name = document.getElementById('nameInput').value.trim();
+    const phone = document.getElementById('phoneInput').value.trim();
+    const org = document.getElementById('orgInput').value.trim();
+    const title = document.getElementById('titleInput').value.trim();
+
+    if (!name || !phone) {
+        alert("성명과 휴대폰 번호는 필수 입력입니다.");
+        return;
+    }
+
+    if (id) {
+        // 수정
+        const index = contacts.findIndex(c => c.id === id);
+        if (index > -1) {
+            contacts[index] = { id, name, phone, org, title };
+        }
+    } else {
+        // 신규 추가
+        const newContact = {
+            id: Date.now().toString(),
+            name, phone, org, title
+        };
+        contacts.unshift(newContact); // 최신 항목이 위로
+    }
+
+    saveToLocal();
+    renderContacts();
+    closeFormModal();
+}
+
+// 연락처 삭제
+function deleteContact(id) {
+    if (confirm("이 연락처를 삭제하시겠습니까?")) {
+        contacts = contacts.filter(c => c.id !== id);
+        saveToLocal();
+        renderContacts();
+    }
+}
+
+// 화면에 리스트 그리기
+function renderContacts(filterText = '') {
+    const listEl = document.getElementById('contactList');
+    const countEl = document.getElementById('totalCount');
+    
+    listEl.innerHTML = '';
+    
+    const filtered = contacts.filter(c => 
+        c.name.includes(filterText) || 
+        c.org.includes(filterText) ||
+        c.phone.includes(filterText)
+    );
+    
+    countEl.innerText = filtered.length;
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="empty-state">저장된 연락처가 없습니다.</div>`;
+        return;
+    }
+
+    filtered.forEach(c => {
+        const fullOrg = c.title ? `${c.org} ${c.title}`.trim() : c.org;
+        const card = document.createElement('div');
+        card.className = 'contact-card';
+        card.innerHTML = `
+            <div class="contact-info" onclick="openFormModal('${c.id}')" style="flex:1; cursor:pointer;">
+                <div class="org">${fullOrg || '소속 없음'}</div>
+                <div class="name">${c.name}</div>
+                <div class="phone">${c.phone}</div>
+            </div>
+            <div class="contact-actions">
+                <button class="icon-btn" onclick="deleteContact('${c.id}')">
+                    <span class="material-icons-rounded" style="font-size: 20px;">delete</span>
+                </button>
+                <a href="tel:${c.phone}" class="call-btn">
+                    <span class="material-icons-rounded" style="font-size: 20px;">call</span>
+                </a>
+            </div>
+        `;
+        listEl.appendChild(card);
+    });
+}
+
+function filterContacts() {
+    const text = document.getElementById('searchInput').value;
+    renderContacts(text);
+}
+
+// 엑셀 내보내기 (SheetJS 사용)
+function exportToExcel() {
+    if (contacts.length === 0) {
+        alert("저장된 연락처가 없습니다.");
+        return;
+    }
+    
+    // 데이터를 엑셀 포맷에 맞게 변환
+    const dataForExcel = contacts.map((c, index) => ({
+        '연번': index + 1,
+        '소속': c.org,
+        '직위': c.title,
+        '성명': c.name,
+        '연락처': c.phone
+    }));
+
+    // 워크북 생성
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(dataForExcel);
+
+    // 컬럼 넓이 조절
+    ws['!cols'] = [
+        { wch: 5 },  // 연번
+        { wch: 20 }, // 소속
+        { wch: 10 }, // 직위
+        { wch: 15 }, // 성명
+        { wch: 20 }  // 연락처
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "연락처 목록");
+
+    // 오늘 날짜로 파일명 생성
+    const today = new Date();
+    const dateStr = today.getFullYear().toString() + 
+                    (today.getMonth() + 1).toString().padStart(2, '0') + 
+                    today.getDate().toString().padStart(2, '0');
+    
+    XLSX.writeFile(wb, `연락처목록_${dateStr}.xlsx`);
+}
